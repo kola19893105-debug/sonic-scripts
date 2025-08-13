@@ -1,0 +1,355 @@
+local REQUIRED_KEY = "sonic script deko1"
+local DISCORD_INVITE_URL = "https://discord.gg/BrF3wFKedH"
+local RAYFIELD_URL = "https://sirius.menu/rayfield"
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+
+local LocalPlayer = Players.LocalPlayer
+local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local function notify(t,m,d) pcall(function() StarterGui:SetCore("SendNotification",{Title=t,Text=m,Duration=d or 3}) end) end
+local function trim(s) return (s and s:gsub("^%s+",""):gsub("%s+$","")) or s end
+
+pcall(function()
+    if isfile and isfile("SonicHubKey.txt") and delfile then
+        delfile("SonicHubKey.txt")
+    end
+end)
+
+local function runUserRayfieldScript()
+    notify("Sonic hub","Loading Rayfield...",2)
+    local ok, loader = pcall(function() return loadstring(game:HttpGet(RAYFIELD_URL))() end)
+    if not ok or not loader then
+        notify("Sonic hub","Failed to load Rayfield.",6)
+        return
+    end
+    local ok2, Window = pcall(function()
+        return loader:CreateWindow({
+            Name = "Sonic hub",
+            LoadingTitle = "Loading...",
+            LoadingSubtitle = "Fixed edition",
+            ConfigurationSaving = { Enabled = true, FolderName = "99N_Configs", FileName = "cfg" },
+            Discord = { Enabled = true, Invite = "BrF3wFKedH", RememberJoins = true },
+            KeySystem = false
+        })
+    end)
+    if not ok2 or not Window then
+        notify("Sonic hub","Rayfield CreateWindow failed.",6)
+        return
+    end
+
+    local mouse = LocalPlayer:GetMouse()
+
+    local function safeChar() return LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait() end
+    local function getHumanoid(ch) if ch then return ch:FindFirstChildOfClass("Humanoid") end end
+    local function getHRP(ch) if ch then return ch:FindFirstChild("HumanoidRootPart") end end
+
+    local state = {
+        noclip=false, godmode=false, antiAfk=true,
+        walkSpeed=16, jumpPower=50, fly=false, flySpeed=120,
+        killAura=false, killRadius=25, autoCollect=false, collectRadius=30, autoFarm=false,
+        tpOnClick=false, tpForward=10, tpSmooth=true, tpSmoothSpeed=200,
+        espEnemies=false, espItems=false, espPlayers=false, espChests=false,
+        collectPatterns = {}
+    }
+
+    RunService.Heartbeat:Connect(function()
+        pcall(function()
+            local hum = getHumanoid(safeChar())
+            if hum then hum.WalkSpeed = state.walkSpeed hum.JumpPower = state.jumpPower end
+        end)
+    end)
+
+    local noclipConn
+    local function setNoclip(v)
+        state.noclip = v
+        if v then
+            if noclipConn then noclipConn:Disconnect() end
+            noclipConn = RunService.Stepped:Connect(function()
+                local c = LocalPlayer.Character
+                if c then for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide = false end end end
+            end)
+        else
+            if noclipConn then noclipConn:Disconnect() noclipConn=nil end
+        end
+    end
+
+    local godConn
+    local function setGod(v)
+        state.godmode = v
+        if v then
+            if godConn then godConn:Disconnect() end
+            godConn = LocalPlayer.CharacterAdded:Connect(function(ch)
+                task.wait(0.5)
+                local h = getHumanoid(ch)
+                if h then pcall(function() h.MaxHealth = 9e9 h.Health = h.MaxHealth end) end
+            end)
+            local ch = LocalPlayer.Character
+            if ch then local h = getHumanoid(ch) if h then pcall(function() h.MaxHealth = 9e9 h.Health = h.MaxHealth end) end end
+        else
+            if godConn then godConn:Disconnect() godConn=nil end
+            local ch = LocalPlayer.Character
+            local h = getHumanoid(ch)
+            if h then pcall(function() h.MaxHealth = 100 h.Health = 100 end) end
+        end
+    end
+
+    local afkConn
+    local function setAntiAfk(v)
+        state.antiAfk = v
+        if v then
+            if afkConn then afkConn:Disconnect() end
+            afkConn = LocalPlayer.Idled:Connect(function()
+                pcall(function()
+                    local vu = game:GetService("VirtualUser")
+                    vu:CaptureController()
+                    vu:ClickButton2(Vector2.new(0,0))
+                end)
+            end)
+        else
+            if afkConn then afkConn:Disconnect() afkConn=nil end
+        end
+    end
+    setAntiAfk(state.antiAfk)
+
+    local flyBV, flyBG
+    local flyControl = {fwd=0,back=0,left=0,right=0,up=0,down=0}
+    local function startFly()
+        local ch = safeChar(); local hrp = getHRP(ch) if not hrp then return end
+        if not flyBV then flyBV = Instance.new("BodyVelocity"); flyBV.MaxForce = Vector3.new(1e5,1e5,1e5) end
+        flyBV.Velocity = Vector3.new(0,0,0); flyBV.Parent = hrp
+        if not flyBG then flyBG = Instance.new("BodyGyro"); flyBG.MaxTorque = Vector3.new(1e5,1e5,1e5); flyBG.P = 2000 end
+        flyBG.Parent = hrp; flyBG.CFrame = hrp.CFrame
+    end
+    local function stopFly() pcall(function() if flyBV and flyBV.Parent then flyBV.Parent=nil end if flyBG and flyBG.Parent then flyBG.Parent=nil end end) end
+    local function updateFly()
+        if not state.fly then stopFly(); return end
+        local ch = safeChar(); local hrp = getHRP(ch) if not hrp then return end
+        if flyBV.Parent~=hrp then flyBV.Parent=hrp end
+        if flyBG.Parent~=hrp then flyBG.Parent=hrp end
+        local cam = workspace.CurrentCamera
+        local dir = Vector3.new()
+        dir = dir + cam.CFrame.LookVector * (flyControl.fwd - flyControl.back)
+        dir = dir + cam.CFrame.RightVector * (flyControl.right - flyControl.left)
+        dir = dir + Vector3.new(0,1,0) * (flyControl.up - flyControl.down)
+        if dir.Magnitude>0 then flyBV.Velocity = dir.Unit * state.flySpeed; flyBG.CFrame = CFrame.new(hrp.Position, hrp.Position + cam.CFrame.LookVector) else flyBV.Velocity = Vector3.new(0,0,0) end
+    end
+    UserInputService.InputBegan:Connect(function(i,gp) if gp then return end
+        if i.KeyCode==Enum.KeyCode.W then flyControl.fwd=1 end
+        if i.KeyCode==Enum.KeyCode.S then flyControl.back=1 end
+        if i.KeyCode==Enum.KeyCode.A then flyControl.left=1 end
+        if i.KeyCode==Enum.KeyCode.D then flyControl.right=1 end
+        if i.KeyCode==Enum.KeyCode.Space then flyControl.up=1 end
+        if i.KeyCode==Enum.KeyCode.LeftShift then flyControl.down=1 end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.KeyCode==Enum.KeyCode.W then flyControl.fwd=0 end
+        if i.KeyCode==Enum.KeyCode.S then flyControl.back=0 end
+        if i.KeyCode==Enum.KeyCode.A then flyControl.left=0 end
+        if i.KeyCode==Enum.KeyCode.D then flyControl.right=0 end
+        if i.KeyCode==Enum.KeyCode.Space then flyControl.up=0 end
+        if i.KeyCode==Enum.KeyCode.LeftShift then flyControl.down=0 end
+    end)
+    RunService.RenderStepped:Connect(function() if state.fly then updateFly() end end)
+
+    local function isEnemyModel(m)
+        if not m or m == LocalPlayer.Character then return false end
+        if typeof(m) == "Instance" and m:IsA("Model") and m:FindFirstChildOfClass("Humanoid") then
+            return true
+        end
+        return false
+    end
+    local function gatherEnemies()
+        local out = {}
+        for _,v in ipairs(workspace:GetDescendants()) do if isEnemyModel(v) then table.insert(out,v) end end
+        return out
+    end
+    local function isPickupPart(p)
+        if not p or not p:IsA("BasePart") then return false end
+        local n = p.Name:lower()
+        if n:find("item") or n:find("loot") or n:find("pickup") or n:find("chest") or n:find("coin") or n:find("log") or n:find("wood") then return true end
+        return false
+    end
+    local function gatherPickups()
+        local out = {}
+        for _,v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") and isPickupPart(v) then table.insert(out,v)
+            elseif v:IsA("Model") then for _,d in ipairs(v:GetDescendants()) do if d:IsA("BasePart") and isPickupPart(d) then table.insert(out,d) end end
+            end
+        end
+        return out
+    end
+
+    local function useTool()
+        local ch = LocalPlayer.Character; if not ch then return end
+        local t = ch:FindFirstChildOfClass("Tool"); if t then pcall(function() t:Activate() end) end
+    end
+    local function attackTarget(model)
+        if not model then return end
+        local hrp = getHRP(safeChar()); local mhrp = model:FindFirstChild("HumanoidRootPart")
+        if hrp and mhrp then pcall(function() hrp.CFrame = mhrp.CFrame * CFrame.new(0,0,2) end); useTool() end
+    end
+
+    local function quickTeleport(p) pcall(function() local hrp = getHRP(safeChar()); if hrp then hrp.CFrame = CFrame.new(p + Vector3.new(0,3,0)) end end) end
+    local function smoothTeleport(p)
+        if not state.tpSmooth then return quickTeleport(p) end
+        local hrp = getHRP(safeChar()); if not hrp then return end
+        local start = hrp.Position; local dist = (p - start).Magnitude
+        local time = math.max(0.02, dist / math.max(1, state.tpSmoothSpeed))
+        local steps = math.max(1, math.ceil(time/0.03))
+        for i=1,steps do
+            local t = i/steps
+            local pos = start:Lerp(p, t)
+            pcall(function() hrp.CFrame = CFrame.new(pos + Vector3.new(0,3,0)) end)
+            RunService.RenderStepped:Wait()
+        end
+    end
+    local function teleportForward(dist)
+        local hrp = getHRP(safeChar()); if not hrp then notify("TP","No HRP",2); return end
+        local dest = hrp.Position + hrp.CFrame.LookVector * (dist or state.tpForward)
+        smoothTeleport(dest)
+    end
+
+    local espPool = {}
+    local function createESP(inst, txt, clr)
+        pcall(function()
+            if not inst or not inst.Parent then return end
+            if espPool[inst] and espPool[inst].Parent then return end
+            local adornee = (inst:IsA("Model") and (inst:FindFirstChild("HumanoidRootPart") or inst:FindFirstChildWhichIsA("BasePart"))) or (inst:IsA("BasePart") and inst)
+            if not adornee then return end
+            local bb = Instance.new("BillboardGui")
+            bb.Name = "__99N_ESP"
+            bb.Adornee = adornee
+            bb.Size = UDim2.new(0,120,0,30)
+            bb.AlwaysOnTop = true
+            bb.Parent = adornee
+            local label = Instance.new("TextLabel", bb)
+            label.Size = UDim2.new(1,0,1,0)
+            label.BackgroundTransparency = 1
+            label.Text = txt or tostring(inst.Name)
+            label.Font = Enum.Font.SourceSansBold
+            label.TextSize = 14
+            label.TextColor3 = clr or Color3.fromRGB(255,100,100)
+            label.TextStrokeTransparency = 0.6
+            espPool[inst] = bb
+        end)
+    end
+    local function clearESP()
+        for k,v in pairs(espPool) do pcall(function() if v and v.Parent then v:Destroy() end end); espPool[k]=nil end
+    end
+    local function refreshESP()
+        clearESP()
+        if state.espEnemies then for _,e in ipairs(gatherEnemies()) do createESP(e, e.Name, Color3.fromRGB(255,120,120)) end end
+        if state.espItems then for _,it in ipairs(gatherPickups()) do createESP(it, it.Name, Color3.fromRGB(200,180,80)) end end
+        if state.espPlayers then for _,pl in ipairs(Players:GetPlayers()) do if pl~=LocalPlayer and pl.Character then createESP(pl.Character, pl.Name, Color3.fromRGB(100,180,255)) end end end
+    end
+
+    local function bringAllByPattern(patterns)
+        local hrp = getHRP(safeChar()); if not hrp then notify("Bring", "No HRP", 2); return end
+        for _, it in ipairs(gatherPickups()) do
+            local ok=false
+            for _,p in ipairs(patterns) do
+                if it.Name:lower():find(p) or (it.Parent and it.Parent.Name:lower():find(p)) then ok=true; break end
+            end
+            if ok then pcall(function() it.CFrame = hrp.CFrame * CFrame.new(0,0,-2) end); task.wait(0.06) end
+        end
+    end
+
+    local clickConn
+    local function setTPonClick(v)
+        state.tpOnClick = v
+        if v then
+            if clickConn then clickConn:Disconnect() clickConn=nil end
+            clickConn = mouse.Button1Down:Connect(function()
+                local h = mouse.Hit
+                if h then smoothTeleport(h.p) end
+            end)
+        else
+            if clickConn then clickConn:Disconnect() clickConn=nil end
+        end
+    end
+
+    local function safeCreate(tab, method, params)
+        if not tab then return notify("UI","Tab missing for "..tostring(method),3) end
+        if type(tab[method])~="function" then notify("UI", method.." not supported", 3); return nil end
+        local ok, res = pcall(function() return tab[method](tab, params) end)
+        if not ok then notify("UI", method.." call failed: "..tostring(res), 3); return nil end
+        return res
+    end
+
+    local MainTab = Window:CreateTab("Main")
+    local MoveTab = Window:CreateTab("Movement")
+    local TPTab = Window:CreateTab("Teleports")
+    local AFarmTab = Window:CreateTab("Autofarm")
+    local ESPTab = Window:CreateTab("ESP")
+    local ExtraTab = Window:CreateTab("Extras")
+    local SetTab = Window:CreateTab("Settings")
+
+    safeCreate(MainTab, "CreateToggle", { Name="Noclip", CurrentValue=state.noclip, Callback=function(v) setNoclip(v) end })
+    safeCreate(MainTab, "CreateToggle", { Name="God Mode", CurrentValue=state.godmode, Callback=function(v) setGod(v) end })
+    safeCreate(MainTab, "CreateToggle", { Name="Anti-AFK", CurrentValue=state.antiAfk, Callback=function(v) setAntiAfk(v) end })
+    safeCreate(MainTab, "CreateToggle", { Name="Kill Aura", CurrentValue=state.killAura, Callback=function(v) state.killAura=v end })
+    safeCreate(MainTab, "CreateSlider", { Name="Kill Radius", Range={5,150}, Increment=1, CurrentValue=state.killRadius, Callback=function(v) state.killRadius=v end })
+    safeCreate(MainTab, "CreateButton", { Name="Use Tool", Callback=function() useTool() end })
+
+    safeCreate(MoveTab, "CreateSlider", { Name="Walk Speed", Range={8,300}, Increment=1, CurrentValue=state.walkSpeed, Callback=function(v) state.walkSpeed=v end })
+    safeCreate(MoveTab, "CreateSlider", { Name="Jump Power", Range={20,300}, Increment=1, CurrentValue=state.jumpPower, Callback=function(v) state.jumpPower=v end })
+    safeCreate(MoveTab, "CreateToggle", { Name="Fly (WASD+Space)", CurrentValue=state.fly, Callback=function(v) state.fly=v if v then startFly() else stopFly() end end })
+    safeCreate(MoveTab, "CreateSlider", { Name="Fly Speed", Range={20,1000}, Increment=1, CurrentValue=state.flySpeed, Callback=function(v) state.flySpeed=v end })
+    safeCreate(MoveTab, "CreateButton", { Name="Teleport Forward (default)", Callback=function() teleportForward(state.tpForward) end })
+
+    safeCreate(TPTab, "CreateToggle", { Name="TP on Click", CurrentValue=state.tpOnClick, Callback=function(v) setTPonClick(v) end })
+    safeCreate(TPTab, "CreateButton", { Name="Teleport to mouse (instant)", Callback=function() local h=mouse.Hit; if h then quickTeleport(h.p) end end })
+    safeCreate(TPTab, "CreateButton", { Name="Teleport Forward 10", Callback=function() teleportForward(10) end })
+    safeCreate(TPTab, "CreateSlider", { Name="Forward Distance", Range={1,200}, Increment=1, CurrentValue=state.tpForward, Callback=function(v) state.tpForward=v end })
+    safeCreate(TPTab, "CreateButton", { Name="Teleport to nearest enemy", Callback=function()
+        local enemies = gatherEnemies()
+        if #enemies==0 then notify("TP","No enemies",2); return end
+        table.sort(enemies, function(a,b)
+            local ah=a:FindFirstChild("HumanoidRootPart"); local bh=b:FindFirstChild("HumanoidRootPart")
+            local myhr=getHRP(safeChar()); if ah and bh and myhr then return (ah.Position-myhr.Position).Magnitude < (bh.Position-myhr.Position).Magnitude end return false
+        end)
+        if enemies[1] and enemies[1].HumanoidRootPart then smoothTeleport(enemies[1].HumanoidRootPart.Position) end
+    end })
+
+    safeCreate(AFarmTab, "CreateToggle", { Name="Auto Collect", CurrentValue=state.autoCollect, Callback=function(v) state.autoCollect=v end })
+    safeCreate(AFarmTab, "CreateToggle", { Name="Auto Farm (Kill+Collect)", CurrentValue=state.autoFarm, Callback=function(v) state.autoFarm=v end })
+    safeCreate(AFarmTab, "CreateButton", { Name="Bring logs/wood", Callback=function() bringAllByPattern({"log","wood","tree"}); notify("Autofarm","Trying to bring wood",2) end })
+    safeCreate(AFarmTab, "CreateButton", { Name="Bring chests/loot", Callback=function() bringAllByPattern({"chest","loot","crate","box"}); notify("Autofarm","Trying to bring chests",2) end })
+    safeCreate(AFarmTab, "CreateButton", { Name="Bring coins/pickups", Callback=function() bringAllByPattern({"coin","pickup","item"}); notify("Autofarm","Trying to bring coins",2) end })
+    safeCreate(AFarmTab, "CreateInput", { Name="Add collect pattern", Placeholder="e.g. gem", Callback=function(v) if v and v~="" then table.insert(state.collectPatterns, v) notify("Pattern","Added: "..v,2) end end })
+    safeCreate(AFarmTab, "CreateButton", { Name="Go to nearest enemy and attack", Callback=function()
+        local enemies=gatherEnemies(); if #enemies==0 then notify("AF","No enemies",2) return end;
+        table.sort(enemies, function(a,b) local ah=a:FindFirstChild("HumanoidRootPart"); local bh=b:FindFirstChild("HumanoidRootPart"); local myhr=getHRP(safeChar()); if ah and bh and myhr then return (ah.Position-myhr.Position).Magnitude < (bh.Position-myhr.Position).Magnitude end return false end);
+        if enemies[1] and enemies[1].HumanoidRootPart then smoothTeleport(enemies[1].HumanoidRootPart.Position); attackTarget(enemies[1]) end
+    end })
+
+    safeCreate(ESPTab, "CreateToggle", { Name="ESP Enemies", CurrentValue=state.espEnemies, Callback=function(v) state.espEnemies=v; refreshESP() end })
+    safeCreate(ESPTab, "CreateToggle", { Name="ESP Items", CurrentValue=state.espItems, Callback=function(v) state.espItems=v; refreshESP() end })
+    safeCreate(ESPTab, "CreateToggle", { Name="ESP Players", CurrentValue=state.espPlayers, Callback=function(v) state.espPlayers=v; refreshESP() end })
+    safeCreate(ESPTab, "CreateButton", { Name="Refresh ESP", Callback=function() refreshESP(); notify("ESP","Refreshed",2) end })
+    safeCreate(ESPTab, "CreateButton", { Name="Clear ESP", Callback=function() clearESP(); notify("ESP","Cleared",2) end })
+
+    safeCreate(ExtraTab, "CreateToggle", { Name="Infinite Jump", CurrentValue=false, Callback=function(v)
+        if v then
+            if not _G.__ijconn then
+                _G.__ijconn = UserInputService.JumpRequest:Connect(function() local h = getHumanoid(safeChar()); if h then pcall(function() h:ChangeState(Enum.HumanoidStateType.Jumping) end) end end)
+            end
+        else
+            if _G.__ijconn then pcall(function() _G.__ijconn:Disconnect() end); _G.__ijconn=nil end
+        end
+    end })
+    safeCreate(ExtraTab, "CreateButton", { Name="Auto Equip Best Tool", Callback=function()
+        local ch=safeChar(); local bag=LocalPlayer:FindFirstChildOfClass("Backpack"); if not bag then notify("Equip","No backpack",2); return end
+        local found
+        for _,it in ipairs(bag:GetChildren()) do if it:IsA("Tool") then found=it; break end end
+        if found then pcall(function() found.Parent=ch end); notify("Equip","Equipped "..found.Name,2) else notify("Equip","No tool found",2) end
+    end })
+    safeCreate(ExtraTab, "CreateToggle", { Name="Auto Heal", CurrentValue=false, Callback=function(v)
+        if v then
+            if not _G.__autoheal then _G.__autoheal = RunService.Heartbeat:Connect(function() local h = getHumanoid(safeChar()); if h and h.Health < (h.MaxHealth or 100) then pcall(function() h.Health = h.MaxHealth end) end end) end
+        else
+            if _G.__autoheal then pcall(function() _G.__auto
